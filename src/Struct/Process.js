@@ -1,0 +1,66 @@
+import sha1 from "sha1";
+
+const generateBlobURL = (data, type) => {
+    const blob = new Blob([data], { type: type });
+    return URL.createObjectURL(blob);
+};
+
+const blobs = {
+
+};
+
+const getBlobURL = (data, type) => {
+    const sha = sha1(data);
+    if (!blobs.hasOwnProperty(type)) {
+        blobs[type] = {};
+    }
+    if (!blobs[type].hasOwnProperty(sha)) {
+        blobs[type][sha] = generateBlobURL(data, type);
+    }
+    return blobs[type][sha];
+}
+
+const getJSBlobURL = data => getBlobURL(data, "text/javascript");
+
+const getAppHtml = data => {
+    if (!(data instanceof Array)) data = [data];
+    let html = '<html><head><meta charset = "UTF-8">';
+    data.forEach(d => html += ['<script src="', d, '"></scr', 'ipt>'].join(""));
+    html += "</head><body></body></html>";
+    return getBlobURL(html, "text/html");
+};
+
+
+
+export default class Process {
+    constructor(id, exec, params, identity, parent) {
+        this.id = id;
+        this.exec = exec;
+        this.params = params;
+        this.identity = identity;
+        this.parent = parent;
+        this.container = null;
+        this.bin = [];
+    }
+
+    loadBin(bin) {
+        this.bin.push(getJSBlobURL(bin));
+        return this;
+    }
+
+    spawn(bin) {
+        this.container = document.createElement("iframe");
+        this.container.sandbox = "allow-scripts allow-same-origin";
+        this.container.id = "pid-" + this.id;
+        document.querySelector("#processes").append(this.container);
+        this.container.src = getAppHtml(this.bin);
+    }
+
+    setContainer(container) {
+        this.container = container;
+    }
+
+    isSource(source) {
+        return source === this.container.contentWindow;
+    }
+}
