@@ -55,23 +55,28 @@ const startProcess = (exec, params, identity, parent) => {
     identity = identity || parent.identity;
     //const frame = document.createElement('iframe');
     try {
-        const execPath = FS.getExec(exec, identity);
-        const code = FS.read(execPath, identity);
-        pids++;
+        return new Promise((resolve, reject) => {
+            FS.execRead(exec, identity)
+                .then(data => {
+                    const execPath = data[0];
+                    const code = data[1];
+                    pids++;
 
-        const process = new Process(pids, execPath, params, identity, parent);
+                    const process = new Process(pids, execPath, params, identity, parent);
 
-        process.loadBin(libJS);
-        process.loadBin("(" + code + ")();");
+                    process.loadBin(libJS);
+                    process.loadBin("(" + code + ")();");
 
-        processes[pids] = process;
+                    processes[pids] = process;
 
-        process.spawn();
-
-        return Promise.resolve([process.exec, process.id, processes.params]);
+                    process.spawn();
+                    resolve([process.id, process.exec, process.params]);
+                })
+                .catch(e => reject(e));
+        });
     } catch (e) {
         console.log(["Process Error", e]);
-        return Promise.reject(["Process Error", ...e]);
+        return Promise.reject(["Process Error", e]);
     }
 };
 
@@ -91,6 +96,9 @@ const messageApp = (processes, type, data, id) => {
 
 }
 
+const OS = {
+    FS: FS,
+}
 
 const appMessage = msg => {
     if (msg.data.type.startsWith("webpack")) return;

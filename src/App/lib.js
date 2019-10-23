@@ -63,7 +63,7 @@ window.addEventListener("message", response);
 
 const hookEvent = (event, cb) => {
     return new Promise((resolve, reject) => {
-        request([event[0], "events", event[1]])
+        request([event[0], event[1]])
             .then(data => {
                 event = event.join(":");
                 if (!hooks.hasOwnProperty(event)) {
@@ -80,6 +80,14 @@ libJSPseudoOS = {
     FS: {
         read: path => request(["FS", "read"], path),
         write: (path, content) => request(["FS", "write"], { path: path, content: content }),
+        list: path => request(["FS", "read"], path),
+        mkdir: path => request(["FS", "mkdir"], path),
+        touch: path => request(["FS", "touch"], path),
+        del: path => request(["FS", "del"], path),
+    },
+    Std: {
+        out: data => request(["Std", "out"], data),
+        inEvent: cb => hookEvent(["Std", "in"], cb),
     },
     Out: {
         print: msg => request(["Out", "print"], { txt: msg, over: 0 }),
@@ -87,13 +95,15 @@ libJSPseudoOS = {
         printOver: (msg, over) => request(["Out", "printOver"], { txt: msg, over: over }),
     },
     Process: {
-        events: {
-            start: cb => hookEvent(["Process", "start"], cb),
-            msg: cb => hookEvent(["Process", "msg"], cb),
-        },
-        end: () => request(["Process", "endss"]),
+        startEvent: cb => hookEvent(["Process", "start"], cb),
+        msgEvent: cb => hookEvent(["Process", "msg"], cb),
+        msg: (pid, msg) => request(["Process", "msg"], { pid: pid, msg: msg }),
+        end: () => request(["Process", "end"]),
         crash: error => request(["Process", "crash"], error),
         ready: () => request(["Process", "ready"]),
+        start: (exec, params) => request(["Process", "start"], { exec: exec, params: params }),
+        kill: (pid) => request(["Process", "kill"], { pid }),
+        list: () => request(["Process", "list"]),
     },
 };
 OS = libJSPseudoOS;

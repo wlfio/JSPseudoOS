@@ -36,11 +36,25 @@ export default class Process {
     constructor(id, exec, params, identity, parent) {
         this.id = id;
         this.exec = exec;
-        this.params = params;
-        this.identity = identity;
+        this.setParams(params);
+        this.setIdentity(identity);
         this.parent = parent;
         this.container = null;
         this.bin = [];
+    }
+
+    setIdentity(identity) {
+        this.identity = identity.clone();
+    }
+
+    setParams(params) {
+        if (params instanceof Array) {
+            this.params = [...params];
+        } else if (typeof params === "object") {
+            this.params = JSON.parse(JSON.stringify(params));
+        } else {
+            this.params = params;
+        }
     }
 
     loadBin(bin) {

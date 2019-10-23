@@ -2,32 +2,39 @@ const dirString = "___dir___";
 
 const cleanSlash = str => str.replace(/\//g, '');
 
-
 export const mkdir = (path, identity) => {
-    path = resolvePath(path, identity);
-    fileDirExistsCheck(path);
-    fileNotExistsCheck(path);
-    hasDirPermissionCheck(path, permBitWrit, identity);
-    doMkdir(path, identity);
+    try {
+        path = resolvePath(path, identity);
+        fileDirExistsCheck(path);
+        fileNotExistsCheck(path);
+        hasDirPermissionCheck(path, permBitWrit, identity);
+        return Promise.resolve(doMkdir(path, identity));
+    } catch (e) {
+        return Promise.reject([...e]);
+    }
 }
 
 const doMkdir = (path, identity) => {
     localStorage.setItem(dirPath(path), dirString);
     doChmod(path, permBitRead | permBitWrit | permBitExec, permBitRead | permBitExec, permBitRead | permBitExec);
     doChown(path, identity);
+    return path;
 }
 
 export const touch = (path, identity) => write(path, "", identity);
 export const write = (path, content, identity) => {
-    path = resolvePath(path, identity);
-    const exists = fileExists(path);
-    if (exists) {
-        hasPermissionCheck(path, permBitWrit, identity);
-    } else {
-        hasDirPermissionCheck(path, permBitWrit, identity);
+    try {
+        path = resolvePath(path, identity);
+        const exists = fileExists(path);
+        if (exists) {
+            hasPermissionCheck(path, permBitWrit, identity);
+        } else {
+            hasDirPermissionCheck(path, permBitWrit, identity);
+        }
+        return Promise.resolve(doWrite(path, content, exists, identity));
+    } catch (e) {
+        return Promise.reject([...e]);
     }
-    doWrite(path, content, exists, identity);
-
 }
 
 const doWrite = (path, content, exists, identity) => {
@@ -37,21 +44,39 @@ const doWrite = (path, content, exists, identity) => {
         doChmod(path, permBitRead | permBitWrit, permBitRead, permBitRead);
         doChown(path, identity);
     }
+    return [path, content];
 }
 
 export const read = (path, identity) => {
-    path = resolvePath(path, identity);
-    hasPermissionCheck(path, permBitRead, identity);
-    return localStorage.getItem(filePath(path));
+    try {
+        path = resolvePath(path, identity);
+        fileExistsCheck(path);
+        hasPermissionCheck(path, permBitRead, identity);
+        return Promise.resolve(doRead(path));
+    } catch (e) {
+        return Promise.reject([...e]);
+    }
 }
 
 const doRead = path => localStorage.getItem(filePath(path));
 
 export const del = (path, identity) => {
-    path = resolvePath(path, identity);
-    hasDirPermissionCheck(path, permBitWrit, identity);
-    doDel(path);
+    try {
+        path = resolvePath(path, identity);
+        hasDirPermissionCheck(path, permBitWrit, identity);
+        fileExistsCheck(path);
+        return Promise.resolve(doDel(path));
+    } catch (e) {
+        return Promise.reject([...e]);
+    }
 }
+
+const doDel = (path) => {
+    localStorage.removeItem(filePath(path));
+    localStorage.removeItem(permPath(path));
+    localStorage.removeItem(owndPath(path));
+    return path;
+};
 
 const getChildren = path => {
     const f = filePath(path);
@@ -65,23 +90,14 @@ const getChildren = path => {
 }
 
 export const list = (path, identity) => {
-    path = resolvePath(path, identity);
-    hasPermissionCheck(path, permBitRead, identity);
-    return paths = getChildren(path).map(p => listEntry);
-}
-
-export const getExec = (exec, identity) => {
-    exec = cleanSlash(exec);
-    const paths = resolveExecPaths(exec, identity);
-    for (let i = 0; i < paths.length; i++) {
-        const path = paths[i];
-        if (fileExists(path)) {
-            if (hasPermission(path, permBitExec, identity)) {
-                return path;
-            }
-        }
+    try {
+        path = resolvePath(path, identity);
+        hasPermissionCheck(path, permBitRead, identity);
+        const paths = getChildren(path).map(p => listEntry);
+        return Promise.resolve(paths);
+    } catch (e) {
+        return Promise.reject([...e]);
     }
-    throw ["FS Error", exec, "Not found"];
 }
 
 const listEntry = path => {
@@ -95,12 +111,35 @@ const listEntry = path => {
     ];
 }
 
-const doDel = (path) => {
-    localStorage.removeItem(filePath(path));
-    localStorage.removeItem(permPath(path));
-    localStorage.removeItem(owndPath(path));
-};
+export const execRead = (exec, identity) => {
+    return new Promise((resolve, reject) => {
+        getExec(exec, identity)
+            .then(path => {
+                read(path, identity)
+                    .then(data => resolve([path, data]))
+                    .catch(e => reject(e));
+            })
+            .catch(e => reject(e));
+    });
+}
 
+export const getExec = (exec, identity) => {
+    try {
+        exec = cleanSlash(exec);
+        const paths = resolveExecPaths(exec, identity);
+        for (let i = 0; i < paths.length; i++) {
+            const path = paths[i];
+            if (fileExists(path)) {
+                if (hasPermission(path, permBitExec, identity)) {
+                    return Promise.resolve(path);
+                }
+            }
+        }
+        throw ["FS Error", exec, "Not found"];
+    } catch (e) {
+        return Promise.reject([...e]);
+    }
+}
 
 export const chmod = (path, identity, hex) => {
     path = resolvePath(path, identity);
@@ -321,6 +360,7 @@ export default {
     touch,
     mkdir,
     getExec,
+    execRead,
     chmod,
     chown,
 };
