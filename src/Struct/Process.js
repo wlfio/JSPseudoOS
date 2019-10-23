@@ -38,7 +38,7 @@ export default class Process {
         this.exec = exec;
         this.setParams(params);
         this.setIdentity(identity);
-        this.parent = parent;
+        this.parent = parent || null;
         this.container = null;
         this.bin = [];
     }
@@ -55,6 +55,10 @@ export default class Process {
         } else {
             this.params = params;
         }
+    }
+
+    hasParent() {
+        return this.parent !== null;
     }
 
     loadBin(bin) {
@@ -76,5 +80,18 @@ export default class Process {
 
     isSource(source) {
         return source === this.container.contentWindow;
+    }
+
+    message(type, data, id) {
+        console.log("MSG TO", this.id, type.join(":"), data);
+        this.container.contentWindow.postMessage({ type: type, data: data, id: id });
+    }
+
+    respond(data, id) {
+        this.message(["response"], data, id);
+    }
+
+    kill() {
+        this.container.parentNode.removeChild(this.container);
     }
 }

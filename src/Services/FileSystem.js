@@ -79,10 +79,12 @@ const doDel = (path) => {
 };
 
 const getChildren = path => {
-    const f = filePath(path);
-    const d = dirPath(path);
+    const f = filePath(path) + "/";
+    const d = dirPath(path) + "/";
+    const l = path.split("/").length;
     return Object.keys(localStorage)
         .filter(p => p.startsWith(f) || p.startsWith(d))
+        .filter(p => p.split("/").length <= l + 1)
         .map(p => {
             p = p.split(":");
             return [p[0] === "FSF", p[1]];
@@ -93,22 +95,32 @@ export const list = (path, identity) => {
     try {
         path = resolvePath(path, identity);
         hasPermissionCheck(path, permBitRead, identity);
-        const paths = getChildren(path).map(p => listEntry);
+        const paths = getChildren(path)
+            .map(p => listEntry(p))
+            .sort((a, b) => a.full < b.full ? -1 : (a.full > b.full ? 1 : 0));
         return Promise.resolve(paths);
     } catch (e) {
-        return Promise.reject([...e]);
+        return Promise.reject(e);
     }
 }
 
-const listEntry = path => {
-    const dir = isDir(path);
-    return [
-        path,
-        !dir,
-        ...getPathOwners(path),
-        getPermBits(path).toString(16),
-        dir ? 0 : new Blob([doRead(path)]).size,
-    ];
+const listEntry = entry => {
+    const dir = !entry[0];
+    const path = entry[1];
+    const ownerData = getPathOwners(path);
+    const perms = getPermBits(path);
+    return {
+        full: path,
+        path: getFileDir(path),
+        name: getFileName(path),
+        ext: !dir ? getFileExt(path) : "",
+        file: !dir,
+        user: ownerData[0],
+        group: ownerData[1],
+        permBytes: perms,
+        perms: (dir ? "d" : "-") + permString(perms),
+        size: dir ? 0 : new Blob([doRead(path)]).size,
+    };
 }
 
 export const execRead = (exec, identity) => {
@@ -231,15 +243,21 @@ const fixPath = path => {
 const hasDirPermissionCheck = (path, action, identity) => hasPermissionCheck(getFileDir(path), action, identity);
 const hasPermissionCheck = (path, action, identity) => {
     if (!hasPermission(path, action, identity)) {
-        throw ["Permissions Error", "Denied " + permString(action), path].join(" : ");
+        throw ["Permissions Error", "Denied " + permStringPart(action), path].join(" : ");
     }
 }
 
-const permString = (action) => {
+const permString = (perms) => {
+    return permStringPart(perms >> bitOffsetUsr)
+        + permStringPart(perms >> bitOffsetGrp)
+        + permStringPart(perms >> bitOffsetAny);
+}
+
+const permStringPart = (action) => {
     let ps = "";
-    if (action & permBitRead) ps += "r";
-    if (action & permBitWrit) ps += "w";
-    if (action & permBitExec) ps += "x";
+    ps += (action & permBitRead) ? "r" : "-";
+    ps += (action & permBitWrit) ? "w" : "-";
+    ps += (action & permBitExec) ? "x" : "-";
     return ps;
 }
 
@@ -307,6 +325,13 @@ const getPermBitsGrp = path => getPermBits(path) >> bitOffsetGrp;
 const getPermBitsAny = path => getPermBits(path) >> bitOffsetAny;
 
 const getPermBits = (path) => parseInt(localStorage.getItem(permPath(path))) || 0;
+
+const getFileName = path => path.split("/").pop();
+
+const getFileExt = path => {
+    path = getFileName(path).split(".");
+    return path.length > 1 ? path.pop() : "";
+}
 
 const getFileDir = path => {
     path = path.split("/");

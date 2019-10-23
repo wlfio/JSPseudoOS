@@ -23,27 +23,24 @@ const uuid4 = () => {
         r.slice(10, 16).reduce(hex, '-');
 };
 
-const response = message => {
-    const type = (message.data.type instanceof Array) ? message.data.type.join(":") : message.data.type;
-    if (type === "response") {
-        if (calls.hasOwnProperty(message.data.id)) {
-            const prom = calls[message.data.id];
-            if (message.data.hasOwnProperty("error")) {
-                prom.reject(message.data.error);
+const response = msg => {
+    msg = msg.data;
+    const type = msg.type;
+    if (!(type instanceof Array)) {
+        return;
+    }
+    if (type[0] === "response") {
+        if (calls.hasOwnProperty(msg.id)) {
+            const prom = calls[msg.id];
+            if (msg.hasOwnProperty("error")) {
+                prom.reject(msg.error);
             } else {
-                prom.resolve(message.data.data);
+                prom.resolve(msg.data);
             }
-            delete calls[message.data.id];
+            delete calls[msg.id];
         }
     } else {
-        if (hooks.hasOwnProperty(type)) {
-            let p = hooks[type].forEach(hook => hook(message.data.data));
-            if (p instanceof Promise) {
-                p.then(data => msg("response", data, message.data.id));
-            } else {
-                libJSPseudoOS.Process.crash("Hook [" + type + "] did not return Promise");
-            }
-        }
+        fireHooks(type, msg.data, msg.id);
     }
 }
 
@@ -62,53 +59,114 @@ const request = (type, data) => {
 window.addEventListener("message", response);
 
 const hookEvent = (event, cb) => {
-    return new Promise((resolve, reject) => {
-        request([event[0], event[1]])
-            .then(data => {
-                event = event.join(":");
-                if (!hooks.hasOwnProperty(event)) {
-                    hooks[event] = [];
-                }
-                hooks[event] = [...hooks[event], cb];
-                resolve(data);
-            })
-            .catch(error => reject(error));
-    });
+    event = event.join(":");
+    if (!hooks.hasOwnProperty(event)) {
+        hooks[event] = [];
+    }
+    hooks[event] = [...hooks[event], cb];
 }
 
-libJSPseudoOS = {
+const fireHooks = (type, data, id) => {
+    type = type.join(":");
+    if (hooks.hasOwnProperty(type)) {
+        const wantsPromise = (typeof id === "string" && id.length > 0);
+        hooks[type].forEach(hook => {
+            const p = hook(data);
+            if (wantsPromise) {
+                if (p instanceof Promise) {
+                    p.then(data => msg(["response"], data, id));
+                } else {
+                    OS.Process.crash("Hook [" + type + "] did not return Promise");
+                }
+            }
+        });
+    }
+};
+
+const Util = {
+    loadArgs: (args, opts, map) => {
+        let remain = [];
+        for (let i = 0; i < args.length; i++) {
+            let arg = args[i];
+            if (arg.startsWith("--") && arg.length > 2) {
+                arg = arg.slice(2);
+                if ((i < args.length - 1) && opts.hasOwnProperty(arg)) {
+                    i++;
+                    opts[arg] = args[i];
+                }
+            } else if (arg.startsWith("-") && arg.length > 1 && arg !== "--") {
+                arg = arg.slice(1);
+                for (let j = 0; j < arg.length; j++) {
+                    const shrt = arg.charAt(j);
+                    if (map.hasOwnProperty(shrt)) {
+                        opts[map[shrt]] = !opts[map[shrt]];
+                    }
+                }
+            } else {
+                remain = [...remain, arg];
+            }
+        }
+        return remain;
+    },
+    bytesToHuman: (bytes, kibi, bits) => {
+        kibi = kibi === true;
+        bits = bits === true;
+        if (bits) bytes *= 8;
+        const step = kibi ? 1000 : 1024;
+        const set =
+            bits ?
+                (kibi ? ["b", "kb", "mb", "gb", "pb"] : ["b", "Kb", "Mb", "Gb", "Pb"])
+                :
+                (kibi ? ["B", "kB", "mB", "gB", "pB"] : ["B", "KB", "MB", "GB", "PB"])
+            ;
+        let o = 0;
+
+        while (bytes > step) {
+            bytes /= step;
+            o++;
+        }
+        return Math.round(bytes) + set[o];
+    }
+};
+
+const libJSPseudoOS = {
     FS: {
         read: path => request(["FS", "read"], path),
         write: (path, content) => request(["FS", "write"], { path: path, content: content }),
-        list: path => request(["FS", "read"], path),
+        list: path => request(["FS", "list"], path),
         mkdir: path => request(["FS", "mkdir"], path),
         touch: path => request(["FS", "touch"], path),
         del: path => request(["FS", "del"], path),
     },
     Std: {
-        out: data => request(["Std", "out"], data),
+        out: data => msg(["Std", "out"], data),
         inEvent: cb => hookEvent(["Std", "in"], cb),
     },
     Out: {
-        print: msg => request(["Out", "print"], { txt: msg, over: 0 }),
+        print: msg => msg(["Out", "print"], { txt: msg, over: 0 }),
         printLn: msg => OS.Out.print(msg + "\n"),
-        printOver: (msg, over) => request(["Out", "printOver"], { txt: msg, over: over }),
+        printOver: (msg, over) => msg(["Out", "printOver"], { txt: msg, over: over }),
     },
     Process: {
         startEvent: cb => hookEvent(["Process", "start"], cb),
         msgEvent: cb => hookEvent(["Process", "msg"], cb),
         msg: (pid, msg) => request(["Process", "msg"], { pid: pid, msg: msg }),
-        end: () => request(["Process", "end"]),
-        crash: error => request(["Process", "crash"], error),
-        ready: () => request(["Process", "ready"]),
+        end: () => msg(["Process", "end"]),
+        crash: error => msg(["Process", "crash"], error),
+        ready: () => msg(["Process", "ready"]),
         start: (exec, params) => request(["Process", "start"], { exec: exec, params: params }),
         kill: (pid) => request(["Process", "kill"], { pid }),
         list: () => request(["Process", "list"]),
+        self: () => request(["Process", "self"]),
     },
+    Util: Util,
 };
 OS = libJSPseudoOS;
 
 
 document.addEventListener("DOMContentLoaded", function (event) {
-    msg("boot");
+    request(["boot"])
+        .then(data => {
+            fireHooks(["Process", "start"], data);
+        });
 });
